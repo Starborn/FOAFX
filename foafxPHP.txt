@@ -1,0 +1,470 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+
+<title>FOAFX Expert Finder</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta name="description" content="Build your own Expert FOAF (Friend-Of-A-Friend) profile. Output as valid RDF/XML syntax." />
+<meta name="keywords" content="expertfinder,emergency and poverty relief,foaf,friend of a friend,rdf,xml,semantic web,rap,php,metadata,foaf-a-matic,social network,relationship,opensource,CCLGPL,creative commons" />
+<meta name="author" content="paola di maio(concept 2007) and nikolai petroff(code 2008)" />
+<meta name="foaf:maker" content="foaf:mbox_sha1sum 'c8fcd0e16e750cfc09c4b1f78f45515c7e6f56f7'" />
+<meta name="robots" content="index,follow" />
+
+<script type="text/javascript" src="jquery.js"></script>
+<script type="text/javascript" src="foaf.js"></script>
+<script type="text/javascript" src="foafx.js"></script>
+<link rel="meta" title="FOAF" type="application/rdf+xml" href="foaf.rdf" />
+<link rel="meta" title="License" type="application/rdf+xml" href="license.rdf" />
+<link rel="stylesheet" type="text/css" href="style2.css" />
+
+
+GENERATEFOAF.PHP
+
+
+<?php
+
+/**
+
+ foafX - eXpertise extentions to FOAF
+ 
+ Version history:
+    v0.2.0
+        complex expertise profile implemented
+        RDF API for PHP (RAP) replaced with manual XML generation for better XML readability
+        data process flow: dynamic HTML forms -> internal PHP variable arrays -> RDF XML
+        TODO: profile editing for returning users
+              multiple sub-field selection for a given top level field of expertise
+    v0.1.0
+        initial demonstration version
+        Basic FOAF profile generation based on a stripped down FOAFgen
+        simple free text "expertise" field extention to FOAF
+
+ 
+ @project concept and expertise design Paola Di Maio
+ @code Nikolai Petroff
+ @version 0.1
+ 
+*/
+
+if (!isset($_POST['submit'])) header("Location: ./index.php");
+
+include('database.inc');
+
+/*
+ *  This function takes the HTML form inputs, creates a big nested array,
+ *  and turns it into XML.
+ *  Possible improvements include:
+ *      - make it recursive for unlimited parent / child depth
+ *      - use an RDF API to produce the XML, though I scrapped
+ *        RAP because it didn't make nice readable XML.
+ */
+function generateFOAF() {
+  include('relations.php');
+  include('namespaces.php');
+
+    $used = 1;
+  $errmsg = "";
+  $rdf = "";
+  $expertise = "";
+
+  // read personal foaf entries
+  $data = array();
+    foreach ($_POST as $key => $value) {
+      $keystart = substr($key, 0, 3);
+        if ($keystart == 'me_' && strlen($value) > 0) {
+            $key = substr($key, 3);
+            if ($key == 'mbox') {
+                if (isset ($_POST['usesha1'])) {
+          $data['mbox_sha1'] = sha1('mailto:'.$value);
+                }
+                else {
+          $data[$key] = 'mailto:'.$value;
+          $data['mbox_sha1'] = sha1('mailto:'.$value);
+                }
+            }
+            elseif ($key=='imid') {
+                if (strlen($_POST['imtype'])>0) {
+                    $data[$_POST['imtype']] = $value;
+                }
+            }
+      elseif ($key=='password') {
+      }
+      elseif ($key=='phone') {
+        if (substr($value,0,4)!='tel:') $value='tel:'.$value;
+        $data[$key] = $value;
+      }
+            elseif (isset($needsRes[$key]) && $needsRes[$key] == 1) {
+                $data[$key] = $value;
+            } else {
+                $data[$key] = $value;
+            }
+        }
+    }
+
+    // read foafX resume
+  $data['resume'] = $_POST['resume'];
+
+    // read foafX languages
+  $i = 1;
+  $postkey = "language";
+  $a = array();
+  $a['_class'] = 'Language';
+  while (isset($_POST[$postkey . $i])) {
+    $lang = array();
+    $lang['name'] = $_POST[$postkey . $i];
+    $lang['speaking'] = $_POST[$postkey . $i . '_speaking'];
+    $lang['reading'] = $_POST[$postkey . $i . '_reading'];
+    $lang['writing'] = $_POST[$postkey . $i . '_writing'];
+    $a[] = $lang;
+    $i++;
+  }
+  $data[$postkey] = $a;
+
+    // read foafX expertise
+  $i = 1;
+  $postkey = "expertise";
+  $a = array();
+  $a['_class'] = "Expertise";
+  while (isset($_POST[$postkey . $i])) {
+    $a1 = array();
+    $expertiseField = $_POST[$postkey . $i] . ":" . $_POST[$postkey . $i . "_level2"] . ":" . $_POST[$postkey . $i . "_fieldOther"];
+    if ($expertise != "") $expertise .= "|";
+    $expertise .= $expertiseField;
+    $a1['field'] = $expertiseField;
+
+      // read foafX work experience
+    $j = 1;
+    $postkey1 = "expertise" . $i . "_workExperience";
+    $a1['workExperience'] = array();
+    $a1['workExperience']['_class'] = 'Job';
+    $a1['workExperience']['_resources'] = array('companyHomepage'=>1);
+    while (isset($_POST[$postkey1 . $j . "_jobTitle"]) && $_POST[$postkey1 . $j . "_jobTitle"] != '') {
+      $a2 = array();
+      $a2['jobTitle'] = $_POST[$postkey1 . $j . "_jobTitle"];
+      $a2['jobDescription'] = $_POST[$postkey1 . $j . "_jobDescription"];
+      $a2['industry'] = $_POST[$postkey1 . $j . "_industry"];
+      $a2['companyName'] = $_POST[$postkey1 . $j . "_companyName"];
+      $a2['companyHomepage'] = $_POST[$postkey1 . $j . "_companyHomepage"];
+      $a2['startDate'] = $_POST[$postkey1 . $j . "_startDate"];
+      $a2['endDate'] = $_POST[$postkey1 . $j . "_endDate"];
+      $a1['workExperience'][] = $a2;
+      $j++;
+    }
+
+      // read foafX skills
+    $j = 1;
+    $postkey1 = "expertise" . $i . "_skill";
+    $a1['skill'] = array();
+    $a1['skill']['_class'] = 'Skill';
+    $a1['skill']['_resources'] = array('url'=>1);
+    while (isset($_POST[$postkey1 . $j . "_name"]) && $_POST[$postkey1 . $j . "_name"] != '') {
+      $a2 = array();
+      $a2['name'] = $_POST[$postkey1 . $j . "_name"];
+      $a2['description'] = $_POST[$postkey1 . $j . "_description"];
+      $a2['url'] = $_POST[$postkey1 . $j . "_url"];
+      $a1['skill'][] = $a2;
+      $j++;
+    }
+
+      // read foafX interests
+    $j = 1;
+    $postkey1 = "expertise" . $i . "_interest";
+    $a1['interest'] = array();
+    $a1['interest']['_class'] = 'Interest';
+    $a1['interest']['_resources'] = array('groupURL'=>1);
+    while (isset($_POST[$postkey1 . $j . "_field"]) && $_POST[$postkey1 . $j . "_field"] != '') {
+      $a2 = array();
+      $a2['field'] = $_POST[$postkey1 . $j . "_field"];
+      $a2['membership'] = $_POST[$postkey1 . $j . "_membership"];
+      $a2['groupURL'] = $_POST[$postkey1 . $j . "_groupURL"];
+      $a1['interest'][] = $a2;
+      $j++;
+    }
+
+      // read foafX contributions
+    $j = 1;
+    $postkey1 = "expertise" . $i . "_contribution";
+    $a1['contribution'] = array();
+    $a1['contribution']['_class'] = 'Contribution';
+    $a1['contribution']['_resources'] = array('URL'=>1,'communityURL'=>1);
+    while (isset($_POST[$postkey1 . $j . "_description"]) && $_POST[$postkey1 . $j . "_description"] != '') {
+      $a2 = array();
+      $a2['description'] = $_POST[$postkey1 . $j . "_description"];
+      $a2['URL'] = $_POST[$postkey1 . $j . "_URL"];
+      $a2['communityName'] = $_POST[$postkey1 . $j . "_communityName"];
+      $a2['communityURL'] = $_POST[$postkey1 . $j . "_communityURL"];
+      $a1['contribution'][] = $a2;
+      $j++;
+    }
+
+      // read foafX other achievements
+    $j = 1;
+    $postkey1 = "expertise" . $i . "_other";
+    $a1['other'] = array();
+    $a1['other']['_class'] = 'Achievement';
+    while (isset($_POST[$postkey1 . $j . "_description"]) && $_POST[$postkey1 . $j . "_description"] != '') {
+      $a2 = array();
+      $a2['description'] = $_POST[$postkey1 . $j . "_description"];
+      $a2['URL'] = $_POST[$postkey1 . $j . "_URL"];
+      $a1['other'][] = $a2;
+      $j++;
+    }
+
+      // read foafX fluency
+    $j = 1;
+    $postkey1 = "expertise" . $i . "_fluency";
+    $a1['fluency'] = array();
+    $a1['fluency']['_class'] = 'Language';
+    while (isset($_POST[$postkey1 . $j . "_language"]) && $_POST[$postkey1 . $j . "_language"] != '') {
+      $a2 = array();
+      $a2['name'] = $_POST[$postkey1 . $j . "_language"];
+      $a1['fluency'][] = $a2;
+      $j++;
+    }
+
+      // read foafX education
+    $j = 1;
+    $postkey1 = "expertise" . $i . "_education";
+    $a1['education'] = array();
+    $a1['education']['_class'] = 'Education';
+    $a1['education']['_resources'] = array('certificateURL'=>1,'institutionURL'=>1);
+    while (isset($_POST[$postkey1 . $j . "_institutionName"]) && $_POST[$postkey1 . $j . "_institutionName"] != '') {
+      $a2 = array();
+      $a2['institutionName'] = $_POST[$postkey1 . $j . "_institutionName"];
+      $a2['degree'] = $_POST[$postkey1 . $j . "_degree"];
+      $a2['qualification'] = $_POST[$postkey1 . $j . "_qualification"];
+      $a2['year'] = $_POST[$postkey1 . $j . "_year"];
+      $a2['subject'] = $_POST[$postkey1 . $j . "_subject"];
+      $a2['certificateURL'] = $_POST[$postkey1 . $j . "_certificateURL"];
+      $a2['institutionURL'] = $_POST[$postkey1 . $j . "_institutionURL"];
+      $a1['education'][] = $a2;
+      $j++;
+    }
+
+      // read foafX grants and awards
+    $j = 1;
+    $postkey1 = "expertise" . $i . "_grantsAndAwards";
+    $a1['grantsAndAwards'] = array();
+    $a1['grantsAndAwards']['_class'] = 'GrantsAndAwards';
+    $a1['grantsAndAwards']['_resources'] = array('website'=>1,'document'=>1);
+    $a1['grantsAndAwards']['_prefix'] = array();
+    while (isset($_POST[$postkey1 . $j . "_name"]) && $_POST[$postkey1 . $j . "_name"] != '') {
+      $a2 = array();
+      $a2['name'] = $_POST[$postkey1 . $j . "_name"];
+      $a2['date'] = $_POST[$postkey1 . $j . "_date"];
+      $a2['website'] = $_POST[$postkey1 . $j . "_website"];
+      $a2['document'] = $_POST[$postkey1 . $j . "_document"];
+      $a1['grantsAndAwards'][] = $a2;
+      $j++;
+    }
+
+      // read foafX publications
+    $j = 1;
+    $postkey1 = "expertise" . $i . "_publication";
+    $a1['publication'] = array();
+    $a1['publication']['_class'] = 'Publication';
+    $a1['publication']['_resources'] = array('URL'=>1);
+    $a1['publication']['_prefix'] = array();
+    while (isset($_POST[$postkey1 . $j . "_title"]) && $_POST[$postkey1 . $j . "_title"] != '') {
+      $a2 = array();
+      $a2['title'] = $_POST[$postkey1 . $j . "_title"];
+      $a2['type'] = $_POST[$postkey1 . $j . "_type"];
+      $a2['authors'] = $_POST[$postkey1 . $j . "_authors"];
+      $a2['journalName'] = $_POST[$postkey1 . $j . "_journalName"];
+      $a2['publisher'] = $_POST[$postkey1 . $j . "_publisher"];
+      $a2['year'] = $_POST[$postkey1 . $j . "_year"];
+      $a2['volume'] = $_POST[$postkey1 . $j . "_volume"];
+      $a2['URL'] = $_POST[$postkey1 . $j . "_URL"];
+      $a2['ISBN'] = $_POST[$postkey1 . $j . "_ISBN"];
+      $a2['SSN'] = $_POST[$postkey1 . $j . "_SSN"];
+      $a2['DOI'] = $_POST[$postkey1 . $j . "_DOI"];
+      $a1['publication'][] = $a2;
+      $j++;
+    }
+
+    $a[] = $a1;
+    $i++;
+  }
+  $data[$postkey] = $a;
+
+    // read foaf friends
+  $i = 1;
+  $postkey = "knows";
+  $a = array();
+  $a['_class'] = 'Person';
+  $a['_prefix'] = array('seeAlso'=>'rdfs');
+  while (isset ($_POST['a'.$i]) && $_POST['e'.$i] > '') {
+    $friend = array();
+    $pname = trim($_POST['c'.$i]);
+        if ($_POST['d'.$i] > '' && $_POST['d'.$i] != $pname)
+            $friend['nick'] = $_POST['d'.$i];
+        if ($pname > '')
+            $friend['name'] = $pname;
+        if (!isset ($_POST['usesha1']))
+            $friend['mbox'] = 'mailto:'.$_POST["e".$i];
+    // always add mbox_sha1sum
+    $sha1=sha1('mailto:'.$_POST["e".$i]);
+    $friend['mbox_sha1'] = $sha1;
+    // homepage
+    if (isset($_POST['f'.$i]) && strlen($_POST['f'.$i]) > 7) {
+      $friend['homepage'] = $_POST["f".$i];
+    }
+    // filled in seeAlso
+    if (isset($_POST['g'.$i]) && strlen($_POST['g'.$i])>7) {
+      $friend['seeAlso'] = $_POST["g".$i];
+    }
+    $a[] = $friend;
+    $i++;
+  }
+  $data[$postkey] = $a;
+
+  // generate RDF XML
+  $foafXkeys = array('resume','expertise','language');
+  $rdfskeys = array('seeAlso');
+  $resources0 = array('homepage'=>1,'weblog'=>1,'depiction'=>1,'resume'=>1);
+  $lf = "\r\n";
+  $in = "   ";
+  $rdf .= '<?xml version="1.0" encoding="UTF-8" ?>' . $lf;
+  $rdf .= "<rdf:RDF ";
+  foreach ($ns as $prefix => $uri) $rdf .= $lf . $in . "xmlns:".$prefix."=\"".$uri."\"";
+  $rdf .= ">" . $lf;
+
+    // create profile description node with primary topic
+  $rdf .= $lf . '<foaf:PersonalProfileDocument rdf:about="">';
+  $rdf .= $lf . $in . '<foaf:maker rdf:resource="#me" />';
+  $rdf .= $lf . $in . '<foaf:primaryTopic rdf:resource="#me" />';
+  $rdf .= $lf . $in . '<admin:generatorAgent rdf:resource="http://foafx.punfai.com/" />';
+  $rdf .= $lf . $in . '<admin:errorReportsTo rdf:resource="mailto:paola.dimaio@gmail.com" />';
+  // create ISO 8601 date (PHP4 compatible)
+  $stamp=date("Y-m-d").'T'.date("H:i:s").substr(date("T"),0,3);
+  $rdf .= $lf . $in . '<dcterms:created rdf:resource="' . htmlspecialchars($stamp) . '" />';
+  $rdf .= $lf . '</foaf:PersonalProfileDocument>';
+
+  $rdf .= $lf . $lf . '<foaf:Person rdf:ID="me">';
+  foreach ($data as $key => $value) {
+    $prefix = "foaf";
+    if (array_search($key, $foafXkeys) !== false) $prefix = "foafx";
+    if (array_search($key, $rdfskeys) !== false) $prefix = "rdfs";
+    if (!is_array($value)) {
+      if ($value != '') {
+        if (isset($resources0[$key]))
+          $rdf .= $lf.$in.'<'.$prefix.':'.$key.' rdf:resource="'.htmlspecialchars($value).'" />';
+        else
+          $rdf .= $lf.$in.'<'.$prefix.':'.$key.'>'.htmlspecialchars($value).'</'.$prefix.':'.$key.'>';
+      }
+    }
+    else {
+      $class = $value['_class'];
+      unset($value['_class']);
+      $prefixes = array();
+      if (isset($value['_prefix'])) { $prefixes = $value['_prefix']; unset($value['_prefix']); }
+      $resources = array();
+      if (isset($value['_resources'])) { $resources = $value['_resources']; unset($value['_resources']); }
+      foreach ($value as $value1) {
+        $rdf .= $lf.$in.'<'.$prefix.':'.$key.'>';
+        $rdf .= $lf.$in.$in.'<'.$prefix.':'.$class.'>';
+        foreach ($value1 as $key2 => $value2) {
+          $prefix1 = $prefix;
+          if (isset($prefixes[$key2])) $prefix1 = $prefixes[$key2];
+          if (!is_array($value2)) {
+            if ($value2 != '') {
+              if (isset($resources[$key2]))
+                $rdf .= $lf.$in.$in.$in.'<'.$prefix1.':'.$key2.' rdf:resource="'.htmlspecialchars($value2).'" />';
+              else
+                $rdf .= $lf.$in.$in.$in.'<'.$prefix1.':'.$key2.'>'.htmlspecialchars($value2).'</'.$prefix1.':'.$key2.'>';
+            }
+          }
+          else {
+            if (!isset($value2['_class'])) print "class not set:".$key2;
+            $class1 = $value2['_class'];
+            unset($value2['_class']);
+            $prefixes1 = array();
+            if (isset($value2['_prefix'])) { $prefixes1 = $value2['_prefix']; unset($value2['_prefix']); }
+            $resources1 = array();
+            if (isset($value2['_resources'])) { $resources1 = $value2['_resources']; unset($value2['_resources']); }
+            foreach ($value2 as $value3) {
+              $rdf .= $lf.$in.$in.$in.'<'.$prefix1.':'.$key2.'>';
+              $rdf .= $lf.$in.$in.$in.$in.'<'.$prefix1.':'.$class1.'>';
+              foreach ($value3 as $key4 => $value4) {
+                $prefix2 = $prefix1;
+                if (isset($prefixes1[$key4])) $prefix2 = $prefixes1[$key4];
+                if ($value4 != '') {
+                  if (isset($resources1[$key4]))
+                    $rdf .= $lf.$in.$in.$in.$in.$in.'<'.$prefix2.':'.$key4.' rdf:resource="'.htmlspecialchars($value4).'" />';
+                  else
+                    $rdf .= $lf.$in.$in.$in.$in.$in.'<'.$prefix2.':'.$key4.'>'.htmlspecialchars($value4).'</'.$prefix2.':'.$key4.'>';
+                }
+              }
+              $rdf .= $lf.$in.$in.$in.$in.'</'.$prefix.':'.$class1.'>';
+              $rdf .= $lf.$in.$in.$in.'</'.$prefix.':'.$key2.'>';
+            }
+          }
+        }
+        $rdf .= $lf.$in.$in.'</'.$prefix.':'.$class.'>';
+        $rdf .= $lf.$in.'</'.$prefix.':'.$key.'>';
+      }
+    }
+  }
+  $rdf .= $lf . '</foaf:Person>';
+  $rdf .= $lf . '</rdf:RDF>';
+ 
+  return array('rdf' => $rdf, 'used' => $used, 'error' => $errmsg, 'expertise' => $expertise);
+}
+
+$foaf = generateFOAF();
+
+// save to database
+$db_name = $_POST['me_givenname'] . " " . $_POST['me_family_name'];
+$db_mbox_sha1 = sha1('mailto:'.$_POST['me_mbox']);
+$db_expertise = $foaf['expertise'];
+$db_rank = 0;
+$db_foafurl = "";
+$db_foafxml = $foaf['rdf'];
+$db_pwd = $_POST['me_password'];
+/*
+foreach ($_POST as $key => $value) {
+    if (substr($key, 0, 12) == 'me_expertise') {
+        if (strlen($value) > 0) {
+            if ($db_expertise != "") $db_expertise .= "|";
+            $db_expertise .= $value;
+        }
+  }
+}
+*/
+
+// authenticate user with email and password.
+$status = "new"; // [new|edit|denied] - (new user, returning user, wrong password)
+// denied if mbox_sha1 exists but password is different
+$sql = "select * from foafprofile where mbox_sha1 = '$db_mbox_sha1'";
+$result = mysql_query($sql);
+if ($row = mysql_fetch_assoc($result)) {
+  $status = "edit";
+  //if ($row['pwd'] != $db_pwd) $status = "denied";
+}
+$error = "";
+if ($status != "denied") {
+  $sql = "replace into `foafprofile` (`name`, `mbox_sha1`, `expertise`, `rank`, `foafurl`, `foafxml`, `pwd`)
+            values ('$db_name', '$db_mbox_sha1', '$db_expertise', '$db_rank', '$db_foafurl', '$db_foafxml', '$db_pwd')";
+  $result = mysql_query($sql);
+  if (!$result) $error = "Database error: " . mysql_error();
+}
+
+include('header.inc');
+
+echo "<div class='subsect'>";
+if ($error != "") echo $error;
+elseif ($status == "new") echo "Profile added to the database.";
+elseif ($status == "edit") echo "Profile updated.";
+elseif ($status == "denied") echo "Incorrect email / password. Profile not saved.";
+echo "</div>";
+
+if ($foaf['used']>0) {
+    //echo "FOAF profile created with ".$foaf['used']." entries:<br/><br/>";
+    echo '<textarea cols="90" rows="26" name="RDF">'.$foaf['rdf'].'</textarea>';
+}
+
+echo '<div class="small">last updated: ' . date("F d Y H:i:s.", filemtime($_SERVER["SCRIPT_FILENAME"])) . '</div>';
+
+include('footer.inc');
+?>
